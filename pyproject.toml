@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "continuing_education"
+version = "0.0.1a1"
+authors = [
+  { name="Steve Madere", email="steve@stevemadere.com" },
+]
+description = "System to ease incremental training of a Huggingface transformer model from a large S3-based dataset"
+readme = "README.md"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies=[
+        's3datasets',
+        'dataclasses',
+        'typing; python_version<"3.5"',
+        'peft'
+]
+
+[project.urls]
+Homepage = "https://github.com/stevemadere/continuing-education"
+Issues = "https://github.com/stevemadere/continuing-education/issues"
+
