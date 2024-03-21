@@ -97,6 +97,3 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 Contributions to `continuing_education` are welcome! Feel free to open an issue if you encounter problems or want to suggest features.
 
----
-
-This README provides a solid foundation for understanding and using your `continuing_education` module. Adjustments can be made to fit more specific details or to expand certain sections as needed.
