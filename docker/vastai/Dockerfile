@@ -16,13 +16,11 @@ RUN pip install jupyterlab \
     "optimum>=1.12.0" \
     --no-cache-dir
 
-RUN pip install "s3datasets>=2.1.0"
+RUN pip install "s3datasets>=2.1.1"
 RUN pip install "continuing-education>=0.0.1a4"
 
 # Just in case you also want to run inference on gptq models
 RUN pip install auto-gptq --extra-index-url https://huggingface.github.io/autogptq-index/whl/cu118/ 
-
-RUN python --version
 
 
 # Copy scripts into the /root directory of the image

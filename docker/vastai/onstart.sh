@@ -1,6 +1,8 @@
 export DATA_DIR="${DATA_DIR:-$HOME/huggingface}"
 env | grep _ >> /etc/environment;
 
+cd /root
+
 if [ -n "$SHOULD_DOWNLOAD_MODEL" ]
 then
   /root/download_hf_model.bash || exit 1
