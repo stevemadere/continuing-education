@@ -53,7 +53,8 @@ continuing_trainer.train()
 ```
 
 Note that it is up to you to download the resulting checkpoints.
-An example script to do this with rsync to a vast.ai instance is included in the examples directory in the source repo.
+An example script to do this with rsync to a vast.ai instance is included in the examples directory in the source repo:
+[vast_sync.bash](https://github.com/stevemadere/continuing-education/blob/main/examples/vast_sync.bash)
 
 ## API Reference
 
