@@ -13,7 +13,9 @@ assert dataset_bucket_name
 output_dir = os.environ.get('OUTPUT_DIR')
 assert output_dir
 
-if 'HF_MODEL_NAME' in os.environ:
+if 'HF_MODEL_NAME' in os.environ and 'DATA_DIR' in os.environ:
+    base_model_id = f"{os.environ['DATA_DIR']}/{os.environ['HF_MODEL_NAME']}"
+elif 'HF_MODEL_NAME' in os.environ and 'HF_CONTRIBUTOR' in os.environ:
     base_model_id = f"{os.environ['HF_CONTRIBUTOR']}/{os.environ['HF_MODEL_NAME']}"
 else:
     base_model_id = 'Mistralai/Mistral-7Bv0.1'
