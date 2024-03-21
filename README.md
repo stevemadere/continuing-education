@@ -95,7 +95,7 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 ## Contributing
 
-Contributions to `continuing_education` are welcome! Please refer to the contributing guidelines for more information on how you can contribute to the project.
+Contributions to `continuing_education` are welcome! Feel free to open an issue if you encounter problems or want to suggest features.
 
 ---
 
