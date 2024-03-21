@@ -1,22 +1,33 @@
 #!/usr/bin/env python
 
-from continuing_trainer import ContinuingTrainer, logger
+from continuing_education import QLoRAContinuingTrainer, logger
 
 import os
 
 if ('AWS_PROFILE' not in os.environ) and not ('AWS_SECRET_ACCESS_KEY' in os.environ and 'AWS_ACCESS_KEY_ID' in os.environ):
   raise EnvironmentError("AWS_PROFILE or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY required in the environment.")
 
-bucket_name=os.environ.get('DATASET_BUCKET')
-data_dir = os.environ.get('DATA_DIR')
+dataset_bucket_name=os.environ.get('DATASET_BUCKET')
+assert dataset_bucket_name
+
 output_dir = os.environ.get('OUTPUT_DIR')
+assert output_dir
+
 if 'HF_MODEL_NAME' in os.environ:
-    base_model_name = f"{os.environ['HF_CONTRIBUTOR']}/{os.environ['HF_MODEL_NAME']}"
+    base_model_id = f"{os.environ['HF_CONTRIBUTOR']}/{os.environ['HF_MODEL_NAME']}"
 else:
-    base_model_name = 'Mistralai/Mistral-7Bv0.1'
+    base_model_id = 'Mistralai/Mistral-7Bv0.1'
 
-logger.info(f'base model is {base_model_name}')
+logger.info(f'base model is {base_model_id}')
 
+# If you don't provide this environment var, the training process will try to train on absolutely
+# every S3 object in your bucket as a text document (in lexicographical order of their S3 keys).
+# If you do provide it, there must be a set of objects in your bucket whose keys match the provided
+# value but with numbers from 1 to N substituted for the substring {segment_number} in your provided value.
+# e.g.  if you provide "/datasets/my_big_dataset_{segment_number}.json.gz and you have at least an object whose
+# key is "/datasets/my_big_dataset_1.json.gz" in your bucket
+# The content of the corresponding objects must be a valid json array of keys of text objects in that
+# same bucket.  e.g. "[ '/text_data/document1.txt', '/text_data/another_document.txt', '/text_data/random_object_name_but_definitely_for_a_text_document', '/surprise_location/more_random_key_shennanegins']
 dataset_series= os.environ.get('DATASET_SERIES')
 
 
@@ -34,9 +45,9 @@ approx_steps_per_segment = 25000
 num_segments = 10
 max_steps = int(os.environ.get('MAX_STEPS') or approx_steps_per_segment*num_segments)
 
-continuing_trainer = ContinuingTrainer(
-                      base_model_name = base_model_name,
-                      bucket_name = bucket_name,
+continuing_trainer = QLoRAContinuingTrainer(
+                      base_model_id = base_model_id,
+                      dataset_bucket_name = dataset_bucket_name,
                       output_dir = output_dir,
                       dataset_series = dataset_series,
                       steps_per_round = steps_per_round,

@@ -5,8 +5,8 @@
 import re
 from typing import Union, cast
 import torch
-from checkpoint_registry import CheckpointRegistry, CheckpointInfo
-from checkpoint_manager import CheckpointManager
+from .checkpoint_registry import CheckpointRegistry, CheckpointInfo
+from .checkpoint_manager import CheckpointManager
 from s3datasets import S3TextDataset
 from datasets import Dataset, IterableDataset
 from tokengenerators import TextDS2TokensGenerator
@@ -15,6 +15,7 @@ from peft.mapping import  get_peft_model
 from peft.peft_model import PeftModel
 from peft import LoraConfig # type: ignore
 from peft.utils.other import prepare_model_for_kbit_training
+from abc import ABC, abstractmethod
 
 from transformers import (
     AutoModelForCausalLM,
@@ -45,10 +46,10 @@ def set_up_logging():
     err_handler = logging.StreamHandler(sys.stderr)
     err_handler.setLevel(logging.ERROR)
 
-    
+
     out_handler = logging.StreamHandler(sys.stdout)
     out_handler.setLevel(logging.INFO)
-    
+
 
     logger.addHandler(info_fh)
     logger.addHandler(debug_fh)
@@ -65,7 +66,7 @@ def torchify_collator(batch):
     # Initialize empty lists to hold each attribute
     labels = []
     attention_mask = []
-    
+
     # Iterate through each item in the batch, grouping by column
     batched_columns = {}
     for item in batch:
@@ -73,30 +74,57 @@ def torchify_collator(batch):
            if not column_name in batched_columns:
                batched_columns[column_name] = []
            batched_columns[column_name].append(v)
-            
+
         labels.append(item['labels'])
         attention_mask.append(item['attention_mask'])
-        
+
     # Convert lists to tensors
     collated = {}
     for column_name,column_data in batched_columns.items():
         if isinstance(column_data[0], list):
             collated[column_name] = torch.tensor(column_data,dtype=torch.long)
         else:
-            collated[column_name] = column_data 
+            collated[column_name] = column_data
     return collated
 
 
-class ContinuingTrainer:
-    base_model_name: str
-    bucket_name: str
-    output_dir: str
-    dataset_id: Union[str,None]
-    dataset_series: Union[str,None]
-    test_dataset_id: Union[str,None]
-    steps_per_round: Union[int,None]
-    max_seq_length: int
-    explicit_max_steps: Union[int,None]
+class BaseContinuingTrainer(ABC):
+    """
+    An abstract base class for all ContinuingTrainer implementations.
+
+    Manages the training of a LoRA on a huggingface Transformer Language Model from text documents in an S3 bucket.
+    While the Huggingface Trainer does this just fine on its own in a single uninterrupted session, it's
+    not practical for use in an environment where training may be interrupted half way through an enormous
+    corpus of training documents.
+
+    This class enables the easy continuation of training after an interruption without wasting huge amounts
+    of time, network bandwidth, and disk storage re-downloading and then ignoring all of the text already
+    seen in the training process. (which is what transformers.Trainer does)
+
+    This class leverages s3datasets to manage all of the downloading and tokenizing/chunking of the
+    documents in the corpus.
+
+    In practice, this base class is not used directly but instead, a subclass such as QLoRAContinuingTrainer
+    is instantiated.
+
+    More subclasses can be implemented to enable different quantization and PEFT techniques.  e.g. LoftQ
+
+    Each subclass of BaseContinuingTrainer must override the following abstract methods:
+        - load_checkpoint_model(self,checkpont_path, base_model_id) to load a previously saved checkpoint
+        - load_starting_model(self, base_model_id) to construct a starting model from the base_model_id.
+
+
+    """
+    base_model_id: str # the id of the base model which will have a LoRA attached to it
+    dataset_bucket_name: str # The name of an S3 bucket containing text documents on which to train
+    output_dir: str # The filesystem directory where checkpoints should be saved
+    dataset_id: Union[str,None]  # A key to an S3 object containing a JSON array of keys of the text objects on which to train
+    dataset_series: Union[str,None] # A pattern for S3 keys of json objects specifying keys of the specific objects to use in training
+    test_dataset_id: Union[str,None] # A key to an S3 object containing a JSON array of keys of the text objects to use an an evaluation dataset
+    steps_per_round: Union[int,None] # Maximum number of training steps to execute in a single call to train().  This is mostly useful for testing the process of interrupting and then continuing training.  Once that's been tested, just make this a very large number.
+    max_seq_length: int # maximum number of tokens in a single training example (GPU memory constrains this )
+    save_steps: int # Automatically make a checkpoint when this many training steps are completed
+    explicit_max_steps: Union[int,None] # If the caller specified max_steps during construction, the value is stored here
 
     checkpoint_registry: CheckpointRegistry
     tokenizer: PreTrainedTokenizerBase
@@ -111,23 +139,24 @@ class ContinuingTrainer:
     checkpoint_manager: CheckpointManager
 
     def __init__(self,
-                 base_model_name: str,
-                 bucket_name: str,
+                 base_model_id: str,
+                 dataset_bucket_name: str,
                  output_dir:str = "/root/outputs",
                  dataset_id: Union[str,None] = None,
                  dataset_series: Union[str,None] = None,
                  test_dataset_id: Union[str,None] = None,
                  steps_per_round: Union[int,None] = None,
                  max_seq_length: int = 2048,
-                 max_steps: Union[int,None] = None
+                 max_steps: Union[int,None] = None,
+                 save_steps: int = 1000
 
                  ):
         if (dataset_id and dataset_series) or (dataset_id == None and dataset_series == None):
             raise ValueError("exactly one of dataset_id or dataset_series must be specified")
         if dataset_series and not '{segment_number}' in dataset_series:
             raise ValueError('dataset_series if specified must contain the substring "{segment_number}"')
-        self.base_model_name = base_model_name
-        self.bucket_name = bucket_name
+        self.base_model_id = base_model_id
+        self.dataset_bucket_name = dataset_bucket_name
         self.output_dir= output_dir
         self.dataset_id = dataset_id
         self.test_dataset_id = test_dataset_id
@@ -135,10 +164,34 @@ class ContinuingTrainer:
         self.steps_per_round = steps_per_round
         self.max_seq_length = max_seq_length
         self.explicit_max_steps = max_steps
+        self.save_steps = save_steps
         self.checkpoint_registry = CheckpointRegistry(output_dir=output_dir)
         self.starting_checkpoint_info = None
 
         self.prepare()
+
+    @abstractmethod
+    def load_checkpoint_model(self, checkpoint_path:str, base_model_id: str) -> PeftModel:
+        """
+            This method must be overridden by subclasses.
+            Its purpose is to load the model to be trained from a previously saved checkpoint saved
+            in the directory specified by the checkpoint_path parameter.
+
+            e.g.  Load a QLoRA model from a checkpoint using the checkpoint_path and base_model_id
+        """
+        if checkpoint_path or base_model_id: # prevent PyRight warnings about unused params
+            pass
+
+    @abstractmethod
+    def load_starting_model(self, base_model_id:str) -> PeftModel:
+        """
+            This method must be overridden by subclasses.
+            Its purpose is to load/prepare the model to be trained from a base model.
+
+            e.g.  Load and quantize the base model and attach a no-op LoRA to it for QLoRA training
+        """
+        if base_model_id: # prevent PyRight warnings about unused params
+            pass
 
     def prepare(self):
         self._cuda_check()
@@ -197,12 +250,28 @@ class ContinuingTrainer:
            self.starting_step = 0
         return self.starting_step
 
+    def _load_model(self):
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_id)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        if self.starting_checkpoint_info:
+            checkpoint_path=self.starting_checkpoint_info.path()
+            logger.info(f"Loading previous checkpoint model at {checkpoint_path}")
+            self.model = self.load_checkpoint_model(checkpoint_path, self.base_model_id)
+        else:
+            logger.info(f"Starting with untrained LoRA on {self.base_model_id}")
+            self.model = self.load_starting_model(self.base_model_id)
+        assert self.model
+        logger.info(f"LoRA model stats: {self.trainable_parameters_description(self.model)}")
+        self.model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
+        return self.model
+
     def _prepare_datasets(self) -> tuple[IterableDataset, Union[Dataset,None]]:
         assert self.tokenizer
 
         train_dataset_id = self._current_dataset_id()
         logger.debug(f"Preparing train dataset from {train_dataset_id}")
-        self.text_dataset = S3TextDataset(self.bucket_name, dataset_id=train_dataset_id).to_full_dataset()
+        self.text_dataset = S3TextDataset(self.dataset_bucket_name, dataset_id=train_dataset_id).to_full_dataset()
         logger.info(f'text_dataset contains {len(self.text_dataset)} documents')
         # TODO:  maybe make these constructor params?
         min_stride=64
@@ -210,7 +279,7 @@ class ContinuingTrainer:
         self.train_tokens_generator = TextDS2TokensGenerator(self.text_dataset, self.tokenizer, chunk_len = self.max_seq_length, min_stride = min_stride, max_waste = max_waste)
         features = self.train_tokens_generator.features()
         if self.test_dataset_id:
-            test_text_dataset = S3TextDataset(self.bucket_name, dataset_id=self.test_dataset_id).to_full_dataset()
+            test_text_dataset = S3TextDataset(self.dataset_bucket_name, dataset_id=self.test_dataset_id).to_full_dataset()
             test_tokens_generator = TextDS2TokensGenerator(test_text_dataset, self.tokenizer, chunk_len = self.max_seq_length, min_stride = min_stride, max_waste = max_waste)
             test_inputs_ds: Dataset = cast(Dataset, Dataset.from_generator(test_tokens_generator))
             self.test_inputs = test_inputs_ds
@@ -218,68 +287,6 @@ class ContinuingTrainer:
             self.test_inputs = None
         self.train_inputs = IterableDataset.from_generator(self.train_tokens_generator,features=features)
         return (self.train_inputs, self.test_inputs)
-
-    def _load_base_model(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        logger.debug(f"loading base model {self.base_model_name}")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            load_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
-        self.base_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name,
-            device_map="auto",
-            trust_remote_code=True,
-            quantization_config=bnb_config,
-        )
-        self.base_model.gradient_checkpointing_enable()         # significantly the reduce memory footprint of the activations cache during training
-        self.base_model = prepare_model_for_kbit_training(self.base_model)
-
-    def _load_model(self) -> PeftModel:
-        if not self.__dict__.get('base_model',None):
-            self._load_base_model()
-        assert self.base_model
-        if self.starting_checkpoint_info:
-            model_path=self.starting_checkpoint_info.path()
-            logger.info(f"Loading previous checkpoint model at {model_path}")
-            self.model = PeftModel.from_pretrained(model=self.base_model,
-                                                   model_id=model_path,
-                                                   adapter_name="default",
-                                                   is_trainable=True)
-        else:
-            logger.info(f"Starting with untrained LoRA on {self.base_model_name}")
-            mistral_7b_target_modules =   [
-                            'q_proj',
-                            'k_proj',
-                            'v_proj',
-                            'o_proj',
-                            'gate_proj',
-                            'up_proj',
-                            'down_proj',
-                            'lm_head', # unsloth does not use this in their benchmark, why?
-            ]
-            
-            
-            new_config = LoraConfig(
-                r=16,
-                lora_alpha=32,
-                target_modules=mistral_7b_target_modules,
-                lora_dropout=0,  # Initially 0.05, changed to 0 because of unsloth
-                bias="none",
-                task_type="CAUSAL_LM",
-            )
-            self.model = cast(PeftModel,get_peft_model(self.base_model,new_config))
-        assert self.model
-        active_adapter = self.model.active_adapter
-        # sometimes active_adaapter is a string, sometimes a function, WTF?
-        if not isinstance(active_adapter, str):
-            active_adapter = active_adapter()
-        logger.info(f"LoRA model stats: {self.trainable_parameters_description(self.model)}, active adapter: {active_adapter} ")
-        self.model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
-        return self.model
 
     def estimated_max_steps(self):
         raise RuntimeError("Have not yet implemented estimated_max_steps(), so specify max_steps explicitly at construction.")
@@ -295,7 +302,6 @@ class ContinuingTrainer:
         gradient_accumulation_steps = 4
         #max_steps = estimated_number_of_training_examples // gradient_accumulation_steps
         max_steps = self.explicit_max_steps if self.explicit_max_steps else self.estimated_max_steps()
-        save_steps =  1000
 
         warmup_steps = 8 if self.dataset_segment_number() in [1,None] else 0
         starting_learning_rate = 2e-4
@@ -313,7 +319,7 @@ class ContinuingTrainer:
                 output_dir=self.output_dir,
                 optim="paged_adamw_8bit",
                 num_train_epochs = num_train_epochs,
-                save_steps=save_steps,      # Checkpoint after this many steps
+                save_steps=self.save_steps,      # Checkpoint regularly every this many steps
                 max_steps=max_steps,
                 evaluation_strategy="no",  # Do not bother with evaluation
                 include_num_input_tokens_seen = True,
@@ -357,7 +363,7 @@ class ContinuingTrainer:
             assert self.dataset_series
             dataset_id = self.dataset_series.replace("{segment_number}",str(self.dataset_segment_number()))
             return dataset_id
-               
+
     @staticmethod
     def trainable_parameters_description(model) -> str:
         """
@@ -371,42 +377,75 @@ class ContinuingTrainer:
                 # print(_)
                 trainable_params += param.numel()
         return f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
-        
-
-
-
-"""
-import os
-
-if 'AWS_PROFILE' not in os.environ and not ('AWS_SECRET_ACCESS_KEY' in os.environ and 'AWS_ACCESS_KEY_ID' in os.environ):
-    raise EnvironmentError("AWS_PROFILE or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY required in the environment.")
-logger.debug(f"env[DATA_DIR] = {os.environ.get('DATA_DIR',None)}")
-bucket_name="os.environ.get('DATASET_BUCKET') or 'vast4elephant"
-data_dir = os.environ.get('DATA_DIR') or '/root/huggingface';
-output_dir = os.environ.get('OUTPUT_DIR') or '/root/outputs';
-base_model_name = os.environ.get('HF_MODEL_NAME') or 'Mistral-7Bv0.1';
-dataset_series= os.environ.get('DATASET_SERIES') or 'datasets/test10000/segment_{segment_number}.json.gz'
-steps_per_round = int(os.environ.get('STEPS_PER_ROUND') or 10000)
-
-continuing_trainer = ContinuingTrainer(
-                        base_model_name = base_model_name,
-                        bucket_name = bucket_name,
-                        output_dir = output_dir,
-                        dataset_series = dataset_series,
-                        steps_per_round = steps_per_round,
-                        max_steps = 25000*10
-                        )
-
-continuing_trainer.train()
-
-                        
-                        
 
 
 
 
+class QLoRAContinuingTrainer(BaseContinuingTrainer):
 
+    def _load_base_model(self, base_model_id: str) -> PreTrainedModel:
+        logger.debug(f"loading base model {self.base_model_id}")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            load_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id,
+            device_map="auto",
+            trust_remote_code=True,
+            quantization_config=bnb_config
+        )
+        base_model.gradient_checkpointing_enable()         # significantly the reduce memory footprint of the activations cache during training
+        base_model = prepare_model_for_kbit_training(base_model)
+        return base_model
 
-# (estimated_number_of_training_examples, training_examples_uncertainty) = (100141, 0.05) # train_tokens_generator.estimate_available_chunks(max_relative_uncertainty = 0.05)
+    def announce_model_config(self, action:str, model: PeftModel) -> None:
+        active_adapter = model.active_adapter
+        # sometimes active_adaapter is a string, sometimes a function, ???
+        if not isinstance(active_adapter, str):
+            active_adapter = active_adapter()
+        logger.info(f"{action} Q-LoRA model. active adapter: {active_adapter} ")
 
-"""
+    def load_checkpoint_model(self, checkpoint_path: str, base_model_id: str) -> PeftModel:
+        if not self.__dict__.get('base_model',None):
+            self.base_model = self._load_base_model(base_model_id)
+        assert self.base_model
+        model = PeftModel.from_pretrained(model=self.base_model,
+                                          model_id=checkpoint_path,
+                                          adapter_name="default",
+                                          is_trainable=True)
+        self.announce_model_config('Loaded', model)
+        return model
+
+    def build_adapter_config(self) -> LoraConfig:
+        mistral_7b_target_modules =   [
+                        'q_proj',
+                        'k_proj',
+                        'v_proj',
+                        'o_proj',
+                        'gate_proj',
+                        'up_proj',
+                        'down_proj',
+                        'lm_head', # unsloth does not use this in their benchmark, why?
+        ]
+
+        adapter_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=mistral_7b_target_modules,
+            lora_dropout=0,  # Initially 0.05, changed to 0 because of unsloth
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        return adapter_config
+
+    def load_starting_model(self, base_model_id: str) -> PeftModel:
+        if not self.__dict__.get('base_model',None):
+            self.base_model = self._load_base_model(base_model_id)
+        assert self.base_model
+        model = cast(PeftModel,get_peft_model(self.base_model,self.build_adapter_config()))
+        self.announce_model_config('Constructed', model)
+        return model
+
