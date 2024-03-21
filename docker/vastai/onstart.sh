@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 export DATA_DIR="${DATA_DIR:-$HOME/huggingface}"
 env | grep _ >> /etc/environment;
 
