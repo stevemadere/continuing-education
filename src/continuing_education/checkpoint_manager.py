@@ -6,7 +6,7 @@ from transformers import Trainer, TrainerCallback, TrainingArguments, TrainerSta
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from typing import Union
 from tokengenerators import TextDS2TokensGenerator, DSGeneratorCursor
-from checkpoint_registry import CheckpointRegistry, CheckpointInfo
+from .checkpoint_registry import CheckpointRegistry, CheckpointInfo
 import logging
 
 default_logger = logging.getLogger(__name__)

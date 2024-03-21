@@ -90,31 +90,51 @@ def torchify_collator(batch):
 
 class BaseContinuingTrainer(ABC):
     """
-    An abstract base class for all ContinuingTrainer implementations.
+    An abstract base class for trainers that support the continuation of training LoRA-enhanced Huggingface
+    transformer models on text documents stored in an S3 bucket, designed for scenarios where training sessions
+    may be interrupted such as on vast.ai or salad.com instances or anywhere where intermittent harware
+    failure is reasonable likely to occur (everywhere?).
 
-    Manages the training of a LoRA on a huggingface Transformer Language Model from text documents in an S3 bucket.
-    While the Huggingface Trainer does this just fine on its own in a single uninterrupted session, it's
-    not practical for use in an environment where training may be interrupted half way through an enormous
-    corpus of training documents.
-
-    This class enables the easy continuation of training after an interruption without wasting huge amounts
-    of time, network bandwidth, and disk storage re-downloading and then ignoring all of the text already
-    seen in the training process. (which is what transformers.Trainer does)
-
-    This class leverages s3datasets to manage all of the downloading and tokenizing/chunking of the
-    documents in the corpus.
+    This class aims to minimize the time, network bandwidth, and storage needed to restart training by efficiently
+    resuming from the point of interruption, leveraging the `s3datasets` library for handling dataset lazy
+    downloading and tokenizing/chunking.
 
     In practice, this base class is not used directly but instead, a subclass such as QLoRAContinuingTrainer
     is instantiated.
 
-    More subclasses can be implemented to enable different quantization and PEFT techniques.  e.g. LoftQ
+    Additional subclasses can be implemented to enable different quantization and PEFT techniques.  e.g. LoftQ
 
-    Each subclass of BaseContinuingTrainer must override the following abstract methods:
-        - load_checkpoint_model(self,checkpont_path, base_model_id) to load a previously saved checkpoint
-        - load_starting_model(self, base_model_id) to construct a starting model from the base_model_id.
+    The following abstract methods defined in this class must be overridden in subclasses to specify model
+    loading behaviors:
+    - `load_checkpoint_model(checkpoint_path, base_model_id)`: Load model from a saved checkpoint.
+    - `load_starting_model(base_model_id)`: Prepare a starting model based on `base_model_id`.
 
+    Args:
+        base_model_id (str): Identifier for the base model to which LoRA will be attached.
+        dataset_bucket_name (str): Name of the S3 bucket containing the training text documents.
+        output_dir (str, optional): Directory where checkpoints will be saved. Defaults to "/root/outputs".
+        dataset_id (Union[str, None], optional): Key to an S3 object containing JSON array of keys for training
+            text objects.
+        dataset_series (Union[str, None], optional): Pattern for S3 keys of JSON objects specifying keys of
+            objects for training.
+            Must include "{segment_number}" if specified. Defaults to None.
+            Exactly one of `dataset_id` or `dataset_series` must be specified. Defaults to None.
+        test_dataset_id (Union[str, None], optional): Key to an S3 object with JSON array of keys for evaluation
+            text objects. Defaults to None.
+        steps_per_round (Union[int, None], optional): Maximum number of training steps per call to train(). Defaults
+            to None.
+        max_seq_length (int, optional): Maximum token count per training example. Defaults to 2048.
+        max_steps (Union[int, None]): Explicit maximum training steps.  Future implementations will
+            estimate this if it is not supplied by the caller but for now it is required.
+        save_steps (int, optional): Interval of training steps after which a checkpoint is auto-saved.
+            Defaults to 1000.
 
+    Raises:
+        ValueError: If both or neither `dataset_id` and `dataset_series` are specified, or if `dataset_series`
+        does not contain "{segment_number}".
     """
+
+    # members initialized from constructor params
     base_model_id: str # the id of the base model which will have a LoRA attached to it
     dataset_bucket_name: str # The name of an S3 bucket containing text documents on which to train
     output_dir: str # The filesystem directory where checkpoints should be saved
@@ -126,17 +146,18 @@ class BaseContinuingTrainer(ABC):
     save_steps: int # Automatically make a checkpoint when this many training steps are completed
     explicit_max_steps: Union[int,None] # If the caller specified max_steps during construction, the value is stored here
 
-    checkpoint_registry: CheckpointRegistry
-    tokenizer: PreTrainedTokenizerBase
-    base_model: PreTrainedModel
-    model: PeftModel
-    starting_step: Union[int,None]
-    starting_checkpoint_info: Union[CheckpointInfo,None]
-    text_dataset: Dataset
-    train_tokens_generator: TextDS2TokensGenerator
-    train_inputs: IterableDataset
-    test_inputs: Union[Dataset, IterableDataset,None]
-    checkpoint_manager: CheckpointManager
+    # internally initialized members
+    checkpoint_registry: CheckpointRegistry  # Manages the registration and retrieval of training checkpoints.
+    tokenizer: PreTrainedTokenizerBase # The tokenizer used to convert text to tokens (derived from base_model_id)
+    base_model: PreTrainedModel # The loaded base model
+    model: PeftModel # The model to be trained, endowed with trainable LoRA modules
+    starting_step: Union[int,None]   # The step number at which the current round of training starts
+    starting_checkpoint_info: Union[CheckpointInfo,None] # Full details on the starting checkpoint if continuing
+    text_dataset: Dataset # A datset of text documents produced by S3TextDataset
+    train_tokens_generator: TextDS2TokensGenerator # A generator of tokenized examles drawing from text_dataset that is used as the basis of the train_inputs iterable dataset
+    train_inputs: IterableDataset # A dataset of training examples ready to feed to a transformers.Trainer
+    test_inputs: Union[Dataset, IterableDataset,None] # A dataset of validation examples ready to feed to a transformers.Trainer
+    checkpoint_manager: CheckpointManager # A TrainerCallback-based manager to create checkpoints and register them and the corresponding generator cursors
 
     def __init__(self,
                  base_model_id: str,
@@ -382,6 +403,17 @@ class BaseContinuingTrainer(ABC):
 
 
 class QLoRAContinuingTrainer(BaseContinuingTrainer):
+    """
+    Implements the continuation of training for NF4-quantized LoRA-enhanced Hugging Face Transformer models.
+
+    This class extends `BaseContinuingTrainer`, implementing model loading methods specific to using QLoRA
+    which quantizes a base model with NF4 and then applies a trainable Low Rank Adapter to it.
+
+    For a detailed explanation of functionality and constructor parameters, see the base class `BaseContinuingTrainer`.
+
+    Note that the standard QLoRA model instantiation which this class uses requires the downloading of a high
+    precision model which is then dynamically quantized to NF4 during loading onto the GPU.
+    """
 
     def _load_base_model(self, base_model_id: str) -> PreTrainedModel:
         logger.debug(f"loading base model {self.base_model_id}")
