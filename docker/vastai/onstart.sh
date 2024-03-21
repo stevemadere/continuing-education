@@ -14,7 +14,7 @@ fi
 
 if [ -n "$SHOULD_START_TRAINING" ]
 then
-  /root/domain_tune_llm.py
+  /root/domain_tune_llm_qlora.py
 fi
 
 

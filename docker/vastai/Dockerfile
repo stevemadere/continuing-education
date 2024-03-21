@@ -29,7 +29,7 @@ RUN python --version
 COPY onstart.sh /root/
 COPY start_jupyter.bash /root/
 COPY download_hf_model.bash /root/
-COPY domain_tune_llm.py /root/
+COPY domain_tune_llm_qlora.py /root/
 
 # Set any additional configurations or environment variables if needed
 # For example:
