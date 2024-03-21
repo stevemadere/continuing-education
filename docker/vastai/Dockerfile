@@ -12,6 +12,7 @@ RUN pip install jupyterlab \
     huggingface_hub \
     hf_transfer \
     accelerate \
+    awscli \
     "bitsandbytes>=0.41.0" \
     "optimum>=1.12.0" \
     --no-cache-dir
@@ -28,6 +29,10 @@ COPY onstart.sh /root/
 COPY start_jupyter.bash /root/
 COPY download_hf_model.bash /root/
 COPY domain_tune_llm_qlora.py /root/
+COPY sync_checkpoints.bash /root/
+
+# Force a rebild of the final image layer in case any of the scripts have changed
+RUN /bin/sh -c 'cksum /root/*.py /root/*.bash /root/*.sh'
 
 # Set any additional configurations or environment variables if needed
 # For example:
