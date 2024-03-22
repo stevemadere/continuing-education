@@ -93,10 +93,10 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 - `train()`: Starts the training process, utilizing checkpoints and dataset management to efficiently continue training sessions.
 
-# Turnkey solution for training a QLoRA from your own S3 bucket on vast.ai
+## Turnkey solution for training a QLoRA from your own S3 bucket on vast.ai
 
 1. Place a large number of text documents in an S3 bucket
-2. Create a DATASET_SERIES in your bucket (see instructions below)
+2. Create a DATASET_SERIES in your bucket (detailed instructions in the next section)
 2. Login to your vast.ai account
 3. Create a new template [here](https://cloud.vast.ai/templates/edit/)
     1. Choose the Image Path stevemadere/vast_train_llm:qlora
@@ -129,7 +129,7 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 6. Check to see that everything is working by switching to the Instances tab and pressing the [ >_ CONNECT ] button which will simply give you an ssh command to copy and paste to your local shell
 
 
-## Creating a DATASET_SERIES
+### Creating a DATASET_SERIES
 While the ContinuingTrainer can flexibly handle multiple methods of specifying the set of documents in your bucket to be used as a training corpus, the example script used in the pre-built docker image only allows for the DATASET_SERIES pattern method.
 
 This is how you create a DATASET_SERIES:
