@@ -126,7 +126,7 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 5. RENT
 6. Check to see that everything is working by switching to the Instances tab and pressing the [ >_ CONNECT ] button which will simply give you an ssh command to copy and paste to your local shell.
 
-- It may take a while for the base model to finish downloading to your instance.  If you suspect that the base model download failed, you can examine the system logs from the instance card.
+- It may take several minutes for the base model to finish downloading to your instance (about 5-7 minutes if the available bandwidth is around 500 Mbps).  If you suspect that the base model download failed, you can examine the system logs from the instance card.
 - Once the base model finishes downloading, a pair of log files should be created by the training process in /root/continuing_trainer.info.log and continuing_trainer.debug.log.  You can examine either of those to see what kind of progress the trainer is making.
 
 
