@@ -93,6 +93,41 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 - `train()`: Starts the training process, utilizing checkpoints and dataset management to efficiently continue training sessions.
 
+# Turnkey solution for training a QLoRA from your own S3 bucket on vast.ai
+
+1. Place a large number of text documents in an S3 bucket
+2. Login to your vast.ai account
+3. Create a new template [here](https://cloud.vast.ai/templates/edit/)
+    1. Choose the Image Path stevemadere/vast_train_llm:qlora
+    2. Set your Docker Options to this (editing as necessary) ```bash
+-e NOTEBOOK_DIR=/root/notebooks
+-e HUGGINGFACE_TOKEN=REPLACE_WITH_YOUR_HUGGINGFACE_API_TOKEN
+-e HF_MODEL_NAME=Mistral-7B-v0.1
+-e HF_CONTRIBUTOR=mistralai
+-e HF_MODEL_REVISION=main
+-e DATASET_BUCKET=THE_NAME_OF_YOUR_S3_BUCKET_CONTAINING_THE_TEXT_DOCUMENTS
+-e CHECKPOINTS_BUCKET=THE_NAME_OF_YOUR_S3_BUCKET_FOR_SAVING_MODELS
+-e CHECKPOINTS_PREFIX=THE_PATH_IN_YOUR_BUCKET_FOR_THIS_SERIES_OF_CHECKPOINTS
+-e DATA_DIR=/root/huggingface
+-e AWS_ACCESS_KEY_ID=YOUR_IAM_CREDENTIALS
+-e AWS_SECRET_ACCESS_KEY=YOUR_IAM_CREDENTIALS
+-e OUTPUT_DIR=/root/outputs
+-e STEPS_PER_ROUND=10000
+-e SHOULD_DOWNLOAD_MODEL=YES
+-e SHOULD_START_TRAINING=YES
+-e SHOULD_SYNC_CHECKPOINTS=YES
+```
+    3. select **Run interactive shell server, SSH** and **Use direct SSH connection**
+    4. Empty the "On-start Script" field as there is already an onstart.sh script in the docker image
+    5. Fill in a template name and description 
+    6. press [SELECT AND SAVE]
+4. Find a host with a RTX-4090 and high bandwidth (>500Mbps is best).  (Watch out for excessive bandwidth rates.  Some unscrupulous hosts try to pull a fast one with bandwidth rates exceeding $20/TB whereas most charge less than $3/TB)
+5. RENT
+6. Check to see that everything is working by switching to the Instances tab and pressing the [ >_ CONNECT ] button which will simply give you an ssh command to copy and paste to your local shell
+
+If you encounter problems, feel free to reach out to me on [linked-in]( https://linkedin.com/in/smadere)
+
+
 ## Contributing
 
 Contributions to `continuing_education` are welcome! Feel free to open an issue if you encounter problems or want to suggest features.
