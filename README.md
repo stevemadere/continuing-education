@@ -62,8 +62,6 @@ An example script to do this with rsync to a vast.ai instance is included in the
 
 `QLoRAContinuingTrainer` is the core class for training models with QLoRA. It extends `BaseContinuingTrainer`, providing mechanisms to load models, prepare datasets, and manage training sessions effectively.
 
-Sure, let's provide a more detailed overview of the initialization parameters for the `QLoRAContinuingTrainer` class, directly leveraging the comprehensive information from the class docstrings:
-
 ## Initialization Parameters
 
 The `QLoRAContinuingTrainer` class initializes with the following parameters:
@@ -93,13 +91,13 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 - `train()`: Starts the training process, utilizing checkpoints and dataset management to efficiently continue training sessions.
 
-## Turnkey solution for training a QLoRA from your own S3 bucket on vast.ai
+## Turnkey solution for training a QLoRA on vast.ai
 
 1. Place a large number of text documents in an S3 bucket
-2. Create a DATASET_SERIES in your bucket (detailed instructions in the next section)
+2. Create a DATASET_SERIES in your bucket (detailed instructions in the [next section](#creating-a-dataset_series))
 2. Login to your vast.ai account
-3. Create a new template [here](https://cloud.vast.ai/templates/edit/)
-    1. Choose the Image Path stevemadere/vast_train_llm:qlora
+3. Create a new vast template [here](https://cloud.vast.ai/templates/edit/)
+    1. Choose the Image Path **stevemadere/vast_train_llm:qlora**
     2. Set your Docker Options to this (editing as necessary) 
     ```bash
     -e NOTEBOOK_DIR=/root/notebooks
@@ -121,12 +119,15 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
     -e SHOULD_SYNC_CHECKPOINTS=YES
     ```
     3. select **Run interactive shell server, SSH** and **Use direct SSH connection**
-    4. Empty the "On-start Script" field as there is already an onstart.sh script in the docker image
+    4. Empty the "On-start Script" field as there is already an _onstart.sh_ script in the docker image
     5. Fill in a template name and description 
     6. press [SELECT AND SAVE]
-4. Find a host with a RTX-4090 and high bandwidth (>500Mbps is best).  (Watch out for excessive bandwidth rates.  Some unscrupulous hosts try to pull a fast one with bandwidth rates exceeding $20/TB whereas most charge less than $3/TB)
+4. Go to the Search tab and find a host with a RTX-4090 and high bandwidth (>500Mbps is best).  (Watch out for excessive bandwidth rates.  Some unscrupulous hosts try to pull a fast one with bandwidth rates exceeding $20/TB whereas most charge less than $3/TB)
 5. RENT
-6. Check to see that everything is working by switching to the Instances tab and pressing the [ >_ CONNECT ] button which will simply give you an ssh command to copy and paste to your local shell
+6. Check to see that everything is working by switching to the Instances tab and pressing the [ >_ CONNECT ] button which will simply give you an ssh command to copy and paste to your local shell.
+
+- It may take a while for the base model to finish downloading to your instance.  If you suspect that the base model download failed, you can examine the system logs from the instance card.
+- Once the base model finishes downloading, a pair of log files should be created by the training process in /root/continuing_trainer.info.log and continuing_trainer.debug.log.  You can examine either of those to see what kind of progress the trainer is making.
 
 
 ### Creating a DATASET_SERIES
@@ -134,12 +135,12 @@ While the ContinuingTrainer can flexibly handle multiple methods of specifying t
 
 This is how you create a DATASET_SERIES:
 
-1. Decide on a name pattern such as _my_datasets/pretraining_test_{segment_number}.json.gz_
-2. Decide how many segments you want to have in your series.  1 is fine.
+1. Decide on a name pattern such as **my_datasets/pretraining_test_{segment_number}.json.gz**
+2. Decide how many segments you want to have in your series.  One is fine.
 3. Make a list of all of the S3 keys of all of the text documents in your dataset bucket that you want to use for your training dataset.
 4. Split that list into as many segments as you chose in step 2.
 5. Create compressed JSON files, each containing a list of document keys from one of those segments of the document ids list and each JSON file with a name matching the pattern you chose in step 1.
-    e.g.:  _my_datasets/pretraining_test_1.json.gz_
+    e.g.:  **my_datasets/pretraining_test_1.json.gz**
 6. Upload those files to your S3 bucket with keys matching the filenames (_aws s3 sync_ works well for this)
 
 
