@@ -76,7 +76,7 @@ class CheckpointManager(TrainerCallback):
               else:
                   self.logger.warn(f"checkpoint {checkpoint} has no dataset cursor")
           if self.dataset_generator:
-              self.logger.info(f"initial_cursor is segment {self.current_dataset_segment_number}, {self.dataset_generator.get_cursor().to_dict()}")
+              self.logger.info(f"initial cursor is segment {self.current_dataset_segment_number}, {self.dataset_generator.get_cursor().to_dict()}")
           else:
               self.logger.debug(f"CheckpointManager is unaware of a dataset_generator")
 
@@ -124,15 +124,16 @@ class CheckpointManager(TrainerCallback):
               global_step = state.global_step
               # make a deep copy of state for debugging purposes
               self.trainer_state_at_save = state.__dict__.copy()
-              if self.checkpoint_registry:
-                  if self.dataset_generator and self.dataset_generator.exhausted:
-                      self.current_dataset_segment_number += 1
-                      self.logger.debug(f"Current dataset exhausted, advancing segment number to {self.current_dataset_segment_number}")
+              if self.dataset_generator and self.dataset_generator.exhausted:
+                  self.current_dataset_segment_number += 1
+                  self.logger.debug(f"Current dataset exhausted, advancing segment number to {self.current_dataset_segment_number}")
+                  if self.checkpoint_registry:
                       self.dataset_generator.set_cursor(DSGeneratorCursor(0,0))
+              self._save_dataset_cursor(checkpoint_path)
+              if self.checkpoint_registry:
                   self.checkpoint_registry.add_checkpoint(global_step=global_step,
                                                           segment_number = self.current_dataset_segment_number,
                                                           checkpoint = checkpoint_dir)
-              self._save_dataset_cursor(checkpoint_path)
           else:
               raise RuntimeError(f"expected checkpoint_path {checkpoint_path} does not exist")
 

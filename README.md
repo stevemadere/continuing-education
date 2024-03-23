@@ -72,6 +72,8 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 - `output_dir (str, optional)`: Directory where checkpoints will be saved. Defaults to "/root/outputs". It is crucial for managing training interruptions and resumptions.
 
+- `checkpoint_sync_uri (str,optional)`: URI describing a place to store and retrieve checkpoints and the checkpoint registry json
+
 - `dataset_id (Union[str, None], optional)`: Key to an S3 object containing a JSON array of keys for training text objects. This is used if your dataset is a single, JSON document listing all of the keys of all of the training text documents.
 
 - `dataset_series (Union[str, None], optional)`: Pattern for S3 keys of JSON objects specifying keys of objects for training. Must include "{segment_number}" if specified. This is useful for large datasets where the key list is split across multiple files. Defaults to None. Exactly one of `dataset_id` or `dataset_series` must be specified.
