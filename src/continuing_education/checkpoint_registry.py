@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 from typing import Callable, Dict, Union, Any, cast, Type
@@ -7,6 +8,9 @@ from abc import ABC, abstractmethod
 import threading
 import subprocess
 from queue import Queue
+import boto3
+from botocore.exceptions import ClientError
+from datetime import timezone
 
 REGISTRY_FILENAME='checkpoint_registry.json'
 
@@ -79,7 +83,6 @@ class RemoteCheckpointSynchronizer(ABC):
 
     @classmethod
     def register_thyself(cls: Type['RemoteCheckpointSynchronizer']) -> None:
-        print(f'registering {cls}')
         cls._handler_registry.append(cls)
 
     @classmethod
@@ -127,31 +130,87 @@ class RemoteCheckpointSynchronizer(ABC):
 
 
 class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
-                         
-     def _upload_all_sync(self):
-         cmd = f'aws s3 sync "{self.local_output_dir}" "{self.remote_uri}"'
-         subprocess.run(cmd, shell=True, check=True)
 
-     def download_one_sync(self, relative_path: str) -> Union[str,None]:
-         full_local_path = os.path.join(self.local_output_dir,relative_path)
-         # use s3 sync first in case the source is a directory
-         cmd = f'aws s3 sync "{self.remote_uri}/{relative_path}" "{full_local_path}"'
-         subprocess.run(cmd, shell=True, check=True)
-         # if the source was an ordinary file, the s3 sync would be a no-op so try to just s3 cp it
-         if (not os.path.exists(full_local_path)):
-             cmd = f'aws s3 cp "{self.remote_uri}/{relative_path}" "{full_local_path}"'
-             subprocess.run(cmd, shell=True, check=True)
-         return full_local_path if (os.path.exists(full_local_path)) else None
+    def _upload_all_sync(self):
+        cmd = f'aws s3 sync "{self.local_output_dir}" "{self.remote_uri}"'
+        subprocess.run(cmd, shell=True, check=True)
 
-     def download_all_sync(self) -> bool:
-         cmd = f'aws s3 sync "{self.remote_uri}" "{self.local_output_dir}"'
-         subprocess.run(cmd, shell=True, check=True)
-         return os.path.exists(self.local_output_dir)
+    def download_one_sync(self, relative_path: str) -> Union[str,None]:
+        full_local_path = os.path.join(self.local_output_dir,relative_path)
+        full_uri = f"{self.remote_uri}/{relative_path}"
+        # first check if it is an ordinary file and if so, follow sync logic on it.
+        # aws s3 sync command only works on directories so I had to implement this:
+        if not S3RemoteCheckpointSynchronizer.sync_s3_uri_to_local_file(full_uri,full_local_path):
+            # use s3 sync in case the source is a directory
+            cmd = f'aws s3 sync "{full_uri}" "{full_local_path}"'
+            # print(f'about to run command "{cmd}"', file=sys.stderr)
+            subprocess.run(cmd, shell=True, check=True)
+        return full_local_path if (os.path.exists(full_local_path)) else None
 
-     @classmethod
-     def can_handle_uri(cls, uri: str) -> bool:
-         # does it match s3: ?
-         return bool(re.match("^s3://",uri))
+    def download_all_sync(self) -> bool:
+        cmd = f'aws s3 sync "{self.remote_uri}" "{self.local_output_dir}"'
+        subprocess.run(cmd, shell=True, check=True)
+        return os.path.exists(self.local_output_dir)
+
+    @classmethod
+    def can_handle_uri(cls, uri: str) -> bool:
+        # does it match s3: ?
+        return bool(re.match("^s3://",uri))
+
+    @staticmethod
+    def parse_s3_uri(s3_uri:str) -> tuple[str,str]:
+        uri_pattern = r'^s3://([^/]+)/(.+)$'
+        match = re.match(uri_pattern, s3_uri)
+        if match:
+            # Extract bucket name and key from the matched groups
+            bucket,key = match.groups()
+            return (bucket,key)
+        else:
+            raise ValueError(f"Invalid S3 URI format: {s3_uri}")
+
+    @staticmethod
+    def sync_s3_uri_to_local_file(s3_uri: str, local_file_path: str) -> bool:
+        # Parse the S3 URI
+        bucket_name, key = S3RemoteCheckpointSynchronizer.parse_s3_uri(s3_uri)
+
+        # Create an S3 client
+        s3_client = boto3.client('s3')
+
+        try:
+            # Get object metadata
+            metadata = s3_client.head_object(Bucket=bucket_name, Key=key)
+            assert metadata
+
+            # Check if local file exists
+            if os.path.exists(local_file_path):
+                # Get local file stats
+                local_file_stat = os.stat(local_file_path)
+                local_file_size = local_file_stat.st_size
+                local_file_mtime = local_file_stat.st_mtime
+
+                # Convert S3 object last modified to timestamp
+                s3_last_modified = metadata['LastModified'].replace(tzinfo=timezone.utc).timestamp()
+
+                # Compare file sizes and modification timestamps
+                if local_file_size == metadata['ContentLength'] and local_file_mtime >= s3_last_modified:
+                    # print("Local file is up to date. No download needed.")
+                    return True
+                else:
+                    # print("Remote is newer or sizes differ")
+                    pass
+            else:
+                # print("Local file does not exist.")
+                pass
+            # Download the file if size or timestamp differ, or if local file does not exist
+            # print(f"Attemting to download {s3_uri} to {local_file_path}")
+            s3_client.download_file(bucket_name, key, local_file_path)
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == "404":
+                # print(f"{s3_uri} does not exist.", file=sys.stderr)
+                return False
+            else:
+                raise
 
 S3RemoteCheckpointSynchronizer.register_thyself()
 
