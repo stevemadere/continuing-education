@@ -1,5 +1,8 @@
 import os
-import sys
+import sys 
+if sys: # suppress pyright warnings about unused sys when all diagnostic prints are commented out
+    pass
+
 import re
 import json
 from typing import Callable, Dict, Union, Any, cast, Type

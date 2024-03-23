@@ -106,7 +106,20 @@ def test_download_one_sync_with_file(populated_s3_checkpoints):
         warning(f'Skipping {current_test_name()}() because {reason}')
         assert True
 
-#def confirm_directory_download_correct(temp_dir: str, rel_path: str, contents dict[str,str]) -> bool:
+def confirm_directory_download_correct(temp_dir: str, rel_path: str, contents: dict[str,str]) -> bool:
+    if rel_path == '':
+        keys_under_rel_path = list(contents.keys())
+    else:
+        keys_under_rel_path = list(filter(lambda x: x.startswith(os.path.join(rel_path,'')), contents.keys()))
+
+    # print(f'Confirming content of objects under {rel_path}: {keys_under_rel_path}')
+    for key in keys_under_rel_path:
+        corresponding_local_path = os.path.join(temp_dir,key)
+        # print(f'comparing {key} with {corresponding_local_path}')
+        assert os.path.exists(corresponding_local_path), f'{corresponding_local_path} does not exist'
+        local_file_content = open(corresponding_local_path,'r').read()
+        assert local_file_content == contents[key]
+    return True
 
 def test_download_one_sync_with_directory(populated_s3_checkpoints):
     s3_uri = populated_s3_checkpoints['uri']
@@ -130,18 +143,29 @@ def test_download_one_sync_with_directory(populated_s3_checkpoints):
             full_path = os.path.join(temp_dir,rel_path)
             assert os.path.exists(full_path), f'{full_path} does not exist'
             assert os.path.isdir(full_path), f'{full_path} is not a directory'
-            keys_under_rel_path = list(filter(lambda x: x.startswith(os.path.join(rel_path,'')), contents.keys()))
-            # print(f'Confirming content of objects under {rel_path}: {keys_under_rel_path}')
-            for key in keys_under_rel_path:
-                corresponding_local_path = os.path.join(temp_dir,key)
-                # print(f'comparing {key} with {corresponding_local_path}')
-                assert os.path.exists(corresponding_local_path), f'{corresponding_local_path} does not exist'
-                local_file_content = open(corresponding_local_path,'r').read()
-                assert local_file_content == contents[key]
+            assert confirm_directory_download_correct(temp_dir, rel_path, contents), f'The content of local dir "{full_path}" does not match {s3_uri}/{rel_path}'
     else:
         reason = populated_s3_checkpoints['reason']
         warning(f'Skipping {current_test_name()}() because {reason}')
         assert True
+
+
+def test_download_all_sync(populated_s3_checkpoints):
+    s3_uri = populated_s3_checkpoints['uri']
+    if s3_uri:
+        contents = populated_s3_checkpoints['contents']
+
+        # print(f'trying download_one_sync on rel_path "{rel_path}"')
+        with tempfile.TemporaryDirectory() as temp_dir:
+            synchronizer = RemoteCheckpointSynchronizer.from_uri(s3_uri, local_output_dir = temp_dir)
+            assert synchronizer
+            synchronizer.download_all_sync()
+            assert confirm_directory_download_correct(temp_dir,'',contents), f'The content of local dir "{temp_dir}" does not match {s3_uri}'
+    else:
+        reason = populated_s3_checkpoints['reason']
+        warning(f'Skipping {current_test_name()}() because {reason}')
+        assert True
+
 
 
 
