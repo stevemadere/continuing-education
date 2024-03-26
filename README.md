@@ -34,15 +34,18 @@ import os
 if 'AWS_PROFILE' not in os.environ and not ('AWS_SECRET_ACCESS_KEY' in os.environ and 'AWS_ACCESS_KEY_ID' in os.environ):
     raise EnvironmentError("AWS credentials required.")
 
+# Where to get training data, locally store, and remotely store checkpoints
 dataset_bucket_name = os.environ['DATASET_BUCKET']
 output_dir = os.environ['OUTPUT_DIR']
+checkpoint_sync_uri = os.environ['CHECKPOINT_SYNC_URI']
 
-base_model_id = 'Mistralai/Mistral-7Bv0.1'  # Default model
+base_model_id = 'Mistralai/Mistral-7Bv0.1'  # Model which will have a trainable LoRA attached to it
 
 # Initialize trainer with environment configurations
 continuing_trainer = QLoRAContinuingTrainer(
     base_model_id=base_model_id,
     dataset_bucket_name=dataset_bucket_name,
+    checkpoint_sync_uri=checkpoint_sync_uri,
     output_dir=output_dir,
     steps_per_round=10000,  # Example configuration
     max_steps=250000  # Example configuration
@@ -52,7 +55,7 @@ continuing_trainer = QLoRAContinuingTrainer(
 continuing_trainer.train()
 ```
 
-Note that it is up to you to download the resulting checkpoints.
+Note that it is up to you to download the resulting checkpoints unless you supply checkpoint_sync_uri.
 An example script to do this with rsync to a vast.ai instance is included in the examples directory in the source repo:
 [vast_sync.bash](https://github.com/stevemadere/continuing-education/blob/main/examples/vast_sync.bash)
 
@@ -72,7 +75,7 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 - `output_dir (str, optional)`: Directory where checkpoints will be saved. Defaults to "/root/outputs". It is crucial for managing training interruptions and resumptions.
 
-- `checkpoint_sync_uri (str,optional)`: URI describing a place to store and retrieve checkpoints and the checkpoint registry json
+- `checkpoint_sync_uri (str,optional)`: URI describing a place to store and retrieve checkpoints and the checkpoint registry json (typically something like "s3://my-bucket/checkpoints/seriesname")
 
 - `dataset_id (Union[str, None], optional)`: Key to an S3 object containing a JSON array of keys for training text objects. This is used if your dataset is a single, JSON document listing all of the keys of all of the training text documents.
 
@@ -97,6 +100,7 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
 
 1. Place a large number of text documents in an S3 bucket
 2. Create a DATASET_SERIES in your bucket (detailed instructions in the [next section](#creating-a-dataset_series))
+2. Make an IAM that can read your dataset S3 bucket and read/write your checkpoints bucket (can be the same if you like) and generate "Access Keys" for that IAM
 2. Login to your vast.ai account
 3. Create a new vast template [here](https://cloud.vast.ai/templates/edit/)
     1. Choose the Image Path **stevemadere/vast_train_llm:qlora**
@@ -108,9 +112,8 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
     -e HF_CONTRIBUTOR=mistralai
     -e HF_MODEL_REVISION=main
     -e DATASET_BUCKET=THE_NAME_OF_YOUR_S3_BUCKET_CONTAINING_THE_TEXT_DOCUMENTS
-    -e DATASET_SERIES=THE_PATTERN_FOR_YOUR_DATASET_SERIES
-    -e CHECKPOINTS_BUCKET=THE_NAME_OF_YOUR_S3_BUCKET_FOR_SAVING_MODELS
-    -e CHECKPOINTS_PREFIX=THE_PATH_IN_YOUR_BUCKET_FOR_THIS_SERIES_OF_CHECKPOINTS
+    -e DATASET_SERIES=THE_KEY_PATTERN_FOR_YOUR_DATASET_SERIES
+    -e CHECKPOINT_SYNC_URI=THE_S3_URI_WHERE_YOU_WANT_TO_SAVE_MODEL_CHECKPOINTS
     -e DATA_DIR=/root/huggingface
     -e AWS_ACCESS_KEY_ID=YOUR_IAM_CREDENTIALS
     -e AWS_SECRET_ACCESS_KEY=YOUR_IAM_CREDENTIALS
@@ -118,7 +121,6 @@ The `QLoRAContinuingTrainer` class initializes with the following parameters:
     -e STEPS_PER_ROUND=10000
     -e SHOULD_DOWNLOAD_MODEL=YES
     -e SHOULD_START_TRAINING=YES
-    -e SHOULD_SYNC_CHECKPOINTS=YES
     ```
     3. select **Run interactive shell server, SSH** and **Use direct SSH connection**
     4. Empty the "On-start Script" field as there is already an _onstart.sh_ script in the docker image
