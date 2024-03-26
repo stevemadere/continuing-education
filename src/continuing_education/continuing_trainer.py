@@ -253,6 +253,8 @@ class BaseContinuingTrainer(ABC):
         logger.info(f'generator cursor after training is segment {self.dataset_segment_number()},  {self.train_tokens_generator.get_cursor().to_dict()}')
         logger.info(f'Trained for {self.checkpoint_manager.steps_seen} steps')
         logger.debug(f'post training trainer state {self.trainer.state.__repr__()}')
+        # Ensure that any ongoing checkpoint uploads complete before returning
+        self.checkpoint_registry.finish_up()
 
     def dataset_segment_number(self):
         if 'checkpoint_manager' in self.__dict__ and self.checkpoint_manager:

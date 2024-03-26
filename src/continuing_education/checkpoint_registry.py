@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import threading
 import subprocess
+import queue
 from queue import Queue
 import boto3
 from botocore.exceptions import ClientError
@@ -50,40 +51,10 @@ import time
 class RemoteCheckpointSynchronizer(ABC):
     local_output_dir: str
     remote_uri: str
+    draining_the_queue: bool
 
-    class Task:
-        func: Callable
-        kwargs: dict
-        done: bool
-        result: Any
-        error: Union[BaseException, None]
-
-        def __init__(self, func:Callable, kwargs:dict) -> None:
-            self.func = func
-            self.kwargs = kwargs
-            self.done=False
-            self.error = None
-            self.result = None
-
-        def execute(self) -> None:
-            try:
-                self.result = self.func(**self.kwargs)
-            except Exception as e:
-                self.error = e
-            finally:
-                self.done=True
-
-        def wait_for_it(self, poll_interval = 0.1) -> None:
-            while not self.done:
-                time.sleep(poll_interval)
-
-    class TaskQueue(Queue):
-        def put(self, item: 'RemoteCheckpointSynchronizer.Task', *args, **kwargs) -> None:
-            return super().put(item, *args, **kwargs)
-
-        def get(self, *args, **kwargs) -> 'RemoteCheckpointSynchronizer.Task':
-            return cast('RemoteCheckpointSynchronizer.Task',super().get(*args,**kwargs))
-
+    _handler_registry: list[Type['RemoteCheckpointSynchronizer']] = []
+    _worker_thread: threading.Thread
 
     def __init__(self, local_output_dir: str, remote_uri: str = ""):
 
@@ -92,22 +63,32 @@ class RemoteCheckpointSynchronizer(ABC):
         self.local_output_dir = local_output_dir
         self.remote_uri = remote_uri
 
+        self.draining_the_queue = False
         self._task_queue = RemoteCheckpointSynchronizer.TaskQueue()
-        self._thread = threading.Thread(target=self._worker)
-        self._thread.daemon = True  # Ensure thread exits when main program exits
-        self._thread.start()
+        self._worker_thread = threading.Thread(target=self._work_the_queue)
+        self._worker_thread.daemon = True  # Ensure thread exits when main program exits
+        self._worker_thread.start()
 
-    def _worker(self):
-        while True:
-            task:RemoteCheckpointSynchronizer.Task = self._task_queue.get()  # Waits for a task to be available
+
+    def _work_the_queue(self):
+        all_done = False
+        while not all_done:
+            task: Union[RemoteCheckpointSynchronizer.Task,None] = None
             try:
-                task.execute()
-                task.done = True
-            finally:
-                self._task_queue.task_done()  # Mark the task as done
+                task = self._task_queue.get(block=True, timeout=1.0)
+            except queue.Empty:
+                if self.draining_the_queue:
+                    all_done = True
+            if task:
+                try:
+                    task.execute()
+                    task.done = True
+                finally:
+                    self._task_queue.task_done()  # Mark the task as done
 
-    _handler_registry: list[Type['RemoteCheckpointSynchronizer']] = []
-
+    def finish_up(self):
+        self.draining_the_queue = True
+        self._worker_thread.join()
 
     @classmethod
     def register_thyself(cls: Type['RemoteCheckpointSynchronizer']) -> None:
@@ -156,6 +137,40 @@ class RemoteCheckpointSynchronizer(ABC):
         task = RemoteCheckpointSynchronizer.Task(self._upload_all_sync,{})
         self._task_queue.put(task)
         return task
+
+    class Task:
+        func: Callable
+        kwargs: dict
+        done: bool
+        result: Any
+        error: Union[BaseException, None]
+
+        def __init__(self, func:Callable, kwargs:dict) -> None:
+            self.func = func
+            self.kwargs = kwargs
+            self.done=False
+            self.error = None
+            self.result = None
+
+        def execute(self) -> None:
+            try:
+                self.result = self.func(**self.kwargs)
+            except Exception as e:
+                self.error = e
+            finally:
+                self.done=True
+
+        def wait_for_it(self, poll_interval = 0.1) -> None:
+            while not self.done:
+                time.sleep(poll_interval)
+
+    class TaskQueue(Queue):
+        def put(self, item: 'RemoteCheckpointSynchronizer.Task', *args, **kwargs) -> None:
+            return super().put(item, *args, **kwargs)
+
+        def get(self, *args, **kwargs) -> 'RemoteCheckpointSynchronizer.Task':
+            return cast('RemoteCheckpointSynchronizer.Task',super().get(*args,**kwargs))
+
 
 
 
@@ -327,4 +342,8 @@ class CheckpointRegistry():
         else:
             return None
 
+    def finish_up(self):
+        if self.remote_synchronizer:
+            self.remote_synchronizer.finish_up()
+            self.upload_in_progress = None
 
