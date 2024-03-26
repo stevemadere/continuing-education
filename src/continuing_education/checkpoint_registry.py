@@ -17,6 +17,12 @@ from datetime import timezone
 
 REGISTRY_FILENAME='checkpoint_registry.json'
 
+verbose = False
+
+def debug_print(message:str, file=sys.stdout):
+    if verbose:
+        print(message, file=file)
+
 @dataclass
 class CheckpointInfo:
     checkpoint_name: str
@@ -157,6 +163,8 @@ class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
 
     def _upload_all_sync(self):
         cmd = f'aws s3 sync "{self.local_output_dir}" "{self.remote_uri}"'
+        if not verbose:
+            cmd += ' > /dev/null 2>&1'
         subprocess.run(cmd, shell=True, check=True)
 
     def download_one_sync(self, relative_path: str) -> Union[str,None]:
@@ -167,12 +175,16 @@ class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
         if not S3RemoteCheckpointSynchronizer.sync_s3_uri_to_local_file(full_uri,full_local_path):
             # use s3 sync in case the source is a directory
             cmd = f'aws s3 sync "{full_uri}" "{full_local_path}"'
-            # print(f'about to run command "{cmd}"', file=sys.stderr)
+            if not verbose:
+                cmd += ' > /dev/null 2>&1'
+            debug_print(f'about to run command "{cmd}"', file=sys.stderr)
             subprocess.run(cmd, shell=True, check=True)
         return full_local_path if (os.path.exists(full_local_path)) else None
 
     def download_all_sync(self) -> bool:
         cmd = f'aws s3 sync "{self.remote_uri}" "{self.local_output_dir}"'
+        if not verbose:
+            cmd += ' > /dev/null 2>&1'
         subprocess.run(cmd, shell=True, check=True)
         return os.path.exists(self.local_output_dir)
 
@@ -217,21 +229,21 @@ class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
 
                 # Compare file sizes and modification timestamps
                 if local_file_size == metadata['ContentLength'] and local_file_mtime >= s3_last_modified:
-                    # print("Local file is up to date. No download needed.")
+                    debug_print("Local file is up to date. No download needed.")
                     return True
                 else:
-                    # print("Remote is newer or sizes differ")
+                    debug_print("Remote is newer or sizes differ")
                     pass
             else:
-                # print("Local file does not exist.")
+                debug_print("Local file does not exist.")
                 pass
             # Download the file if size or timestamp differ, or if local file does not exist
-            # print(f"Attemting to download {s3_uri} to {local_file_path}")
+            debug_print(f"Attemting to download {s3_uri} to {local_file_path}")
             s3_client.download_file(bucket_name, key, local_file_path)
             return True
         except ClientError as e:
             if e.response['Error']['Code'] == "404":
-                # print(f"{s3_uri} does not exist.", file=sys.stderr)
+                debug_print(f"{s3_uri} does not exist.", file=sys.stderr)
                 return False
             else:
                 raise
@@ -298,7 +310,7 @@ class CheckpointRegistry():
         supposed_checkpoint_info: Union[CheckpointInfo,None] = self._registry.get(global_step,None)
         if self.remote_synchronizer and supposed_checkpoint_info and not supposed_checkpoint_info.exists():
             checkpoint_name = supposed_checkpoint_info.checkpoint_name
-            # print(f'about to download_one_sync({checkpoint_name})')
+            debug_print(f'about to download_one_sync({checkpoint_name})')
 
             self.remote_synchronizer.download_one_sync(checkpoint_name)
         if supposed_checkpoint_info and supposed_checkpoint_info.exists():

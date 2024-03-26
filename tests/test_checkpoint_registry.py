@@ -4,9 +4,11 @@ import sys
 
 path_to_source_modules=os.path.abspath(os.path.join(os.path.dirname(__file__), '../src'))
 sys.path.insert(0, path_to_source_modules)
+import continuing_education
 from continuing_education import CheckpointRegistry, RemoteCheckpointSynchronizer
+continuing_education.checkpoint_registry.verbose = False # Make this True for debugging
 
-from .utils.misc import  copy_dict_to_s3
+from .utils.misc import  copy_dict_to_s3, copy_dict_to_fs
 from .utils.directory_dict import DirectoryDict
 from .utils.temp_s3_object import TempS3Object
 from .utils.persistent_temporary_directory import PersistentTemporaryDirectory
@@ -64,9 +66,23 @@ def test_construction_with_remote_synchronizer(writable_s3_uri):
                 else:
                     assert not os.path.exists(full_path)
 
-def test_construction_without_remote_synchronizer():
+def test_construction_without_remote_synchronizer_or_data():
     with tempfile.TemporaryDirectory() as temp_local_dir:
         registry = CheckpointRegistry(output_dir = temp_local_dir)
         assert registry
         assert registry.latest_step() == None
+
+def test_construction_without_remote_synchronizer_but_local_data():
+    with tempfile.TemporaryDirectory() as temp_local_dir:
+        copy_dict_to_fs(remote_checkpoints_content, temp_local_dir)
+        registry = CheckpointRegistry(output_dir = temp_local_dir)
+        assert registry
+        latest_step = registry.latest_step()
+        assert latest_step == 2000
+        checkpoint_2000 = registry.get_checkpoint_for_step(latest_step)
+        assert checkpoint_2000
+        dd = DirectoryDict(checkpoint_2000.path())
+        for checkpoint_rel_path in dd.keys():
+            output_dir_rel_path = f'{checkpoint_2000.checkpoint_name}/{checkpoint_rel_path}'
+            assert dd[checkpoint_rel_path] == remote_checkpoints_content[output_dir_rel_path]
 

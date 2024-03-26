@@ -15,8 +15,10 @@ from .utils.misc import current_test_name, copy_dict_to_fs
 path_to_source_modules=os.path.abspath(os.path.join(os.path.dirname(__file__), '../src'))
 sys.path.insert(0, path_to_source_modules)
 
-from continuing_education import RemoteCheckpointSynchronizer
+import continuing_education
+from continuing_education import  RemoteCheckpointSynchronizer
 from continuing_education.checkpoint_registry import S3RemoteCheckpointSynchronizer
+continuing_education.checkpoint_registry.verbose = False # Make this True for debugging
 
 bucket_name='test_bucket'
 prefix='/checkpoints/test'
