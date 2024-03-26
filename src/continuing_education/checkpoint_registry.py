@@ -263,6 +263,9 @@ class CheckpointRegistry():
         if self.remote_synchronizer:
             assert self.output_dir == self.remote_synchronizer.local_output_dir
         self.upload_in_progress = None
+        # ensure output_dir exists
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         self._load()
 
     def registry_path(self):

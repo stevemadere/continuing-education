@@ -190,7 +190,7 @@ class BaseContinuingTrainer(ABC):
 
         checkpoint_synchronizer: Union[RemoteCheckpointSynchronizer,None] = None
         if checkpoint_sync_uri:
-            checkpoint_synchronizer = RemoteCheckpointSynchronizer.from_uri(uri=checkpoint_sync_uri, local_dir=output_dir)
+            checkpoint_synchronizer = RemoteCheckpointSynchronizer.from_uri(uri=checkpoint_sync_uri, local_output_dir=output_dir)
 
         self.checkpoint_registry = CheckpointRegistry(output_dir=output_dir,
                                                       remote_synchronizer=checkpoint_synchronizer)
