@@ -243,12 +243,14 @@ class CheckpointRegistry():
     output_dir: str
     remote_synchronizer: Union[RemoteCheckpointSynchronizer,None]
     _registry: Dict[int,CheckpointInfo]  # it is necessary to have string keys because of json serialization
+    upload_in_progress: Union[RemoteCheckpointSynchronizer.Task,None]
 
-    def __init__(self, output_dir: str, remote_synchronizer: Union[RemoteCheckpointSynchronizer,None]):
+    def __init__(self, output_dir: str, remote_synchronizer: Union[RemoteCheckpointSynchronizer,None] = None):
         self.output_dir = output_dir
         self.remote_synchronizer = remote_synchronizer
         if self.remote_synchronizer:
             assert self.output_dir == self.remote_synchronizer.local_output_dir
+        self.upload_in_progress = None
         self._load()
 
     def registry_path(self):
@@ -265,7 +267,10 @@ class CheckpointRegistry():
             json.dump(dumpable, f)
         os.rename(tempfilename, realfilename)
         if self.remote_synchronizer:
-            self.remote_synchronizer.upload_all_async()
+            if self.upload_in_progress:
+                self.upload_in_progress.wait_for_it()
+                self.upload_in_progress = None
+            self.upload_in_progress = self.remote_synchronizer.upload_all_async()
 
     def _load(self) -> None:
         registry_path = self.registry_path()
@@ -292,7 +297,10 @@ class CheckpointRegistry():
     def get_checkpoint_for_step(self, global_step: int) -> Union[CheckpointInfo,None]:
         supposed_checkpoint_info: Union[CheckpointInfo,None] = self._registry.get(global_step,None)
         if self.remote_synchronizer and supposed_checkpoint_info and not supposed_checkpoint_info.exists():
-            self.remote_synchronizer.download_one_sync(supposed_checkpoint_info.path())
+            checkpoint_name = supposed_checkpoint_info.checkpoint_name
+            # print(f'about to download_one_sync({checkpoint_name})')
+
+            self.remote_synchronizer.download_one_sync(checkpoint_name)
         if supposed_checkpoint_info and supposed_checkpoint_info.exists():
             return supposed_checkpoint_info
         else:

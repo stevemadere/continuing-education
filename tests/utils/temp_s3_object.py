@@ -1,6 +1,6 @@
 import boto3
 import uuid
-from typing import Union, Any
+from typing import  Any
 
 class TempS3Object:
     """
