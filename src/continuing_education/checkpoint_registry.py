@@ -39,6 +39,8 @@ class CheckpointInfo:
         return instance
 
 
+import time
+
 class RemoteCheckpointSynchronizer(ABC):
     local_output_dir: str
     remote_uri: str
@@ -46,17 +48,33 @@ class RemoteCheckpointSynchronizer(ABC):
     class Task:
         func: Callable
         kwargs: dict
+        done: bool
+        result: Any
+        error: Union[BaseException, None]
 
         def __init__(self, func:Callable, kwargs:dict) -> None:
             self.func = func
             self.kwargs = kwargs
+            self.done=False
+            self.error = None
+            self.result = None
 
-        def execute(self) -> Any:
-            return self.func(**self.kwargs)
+        def execute(self) -> None:
+            try:
+                self.result = self.func(**self.kwargs)
+            except Exception as e:
+                self.error = e
+            finally:
+                self.done=True
+
+        def wait_for_it(self, poll_interval = 0.1) -> None:
+            while not self.done:
+                time.sleep(poll_interval)
 
     class TaskQueue(Queue):
         def put(self, item: 'RemoteCheckpointSynchronizer.Task', *args, **kwargs) -> None:
             return super().put(item, *args, **kwargs)
+
         def get(self, *args, **kwargs) -> 'RemoteCheckpointSynchronizer.Task':
             return cast('RemoteCheckpointSynchronizer.Task',super().get(*args,**kwargs))
 
@@ -78,6 +96,7 @@ class RemoteCheckpointSynchronizer(ABC):
             task:RemoteCheckpointSynchronizer.Task = self._task_queue.get()  # Waits for a task to be available
             try:
                 task.execute()
+                task.done = True
             finally:
                 self._task_queue.task_done()  # Mark the task as done
 
@@ -126,9 +145,11 @@ class RemoteCheckpointSynchronizer(ABC):
         """ downloads one file or directory under the local_dir and returns either the full path to it or None if it failed to download """
         pass
 
-    def upload_all_async(self):
+    def upload_all_async(self) -> 'RemoteCheckpointSynchronizer.Task':
         # Add the sync operation to the queue
-        self._task_queue.put(RemoteCheckpointSynchronizer.Task(self._upload_all_sync,{}))
+        task = RemoteCheckpointSynchronizer.Task(self._upload_all_sync,{})
+        self._task_queue.put(task)
+        return task
 
 
 

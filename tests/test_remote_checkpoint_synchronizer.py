@@ -4,7 +4,13 @@ import os
 import re
 import sys
 from logging import warning
-import inspect
+
+from .utils.persistent_temporary_directory import PersistentTemporaryDirectory
+if PersistentTemporaryDirectory: # Supress pyright unused symbol warnings
+    pass
+
+from .utils.misc import current_test_name, copy_dict_to_fs
+
 
 path_to_source_modules=os.path.abspath(os.path.join(os.path.dirname(__file__), '../src'))
 sys.path.insert(0, path_to_source_modules)
@@ -18,41 +24,6 @@ s3_uri = f's3://{bucket_name}/{prefix}'
 local_output_dir = 'test_outputs'
 
 unsupported_uri = f'mongo://whatever/monog/uris/have/in/the/path'
-
-class PersistentTemporaryDirectory:
-    """
-        A replacement for TemporaryDirectory that skips cleaning up to aid in debugging.
-        This is the same behavior one gets with the delete=True parameter in Python 3.12+
-        but it works in prior versions of Python as well
-    """
-    _dir:str
-
-    def __init__(self):
-        # Create the temporary directory upon instantiation
-        self._dir = tempfile.mkdtemp()
-        warning(f'creating temporary directory {self._dir}')
-
-    @property
-    def name(self):
-        # Provide access to the name (path) of the temporary directory
-        return self._dir
-
-    # Implement the context manager protocol to use with `with` statement
-    def __enter__(self):
-        # Return self to allow access to the class instance and its properties/methods
-        return self._dir
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type or exc_val or exc_tb or True: # silence PyRight unused param warnings
-            # No cleanup is done here, making the directory persistent after exiting the context
-            pass
-
-def current_test_name() -> str:
-    cframe =  inspect.currentframe()
-    if cframe and cframe.f_back and cframe.f_back.f_code:
-        return cframe.f_back.f_code.co_name
-    else:
-        return 'no freaking idea what function I am in right now'
 
 def test_handler_registry_populated() -> None:
     assert len(RemoteCheckpointSynchronizer._handler_registry) > 0
@@ -167,5 +138,47 @@ def test_download_all_sync(populated_s3_checkpoints):
         assert True
 
 
+from .utils.temp_s3_object import TempS3Object
+from .utils.s3_dict import S3Dict
 
+
+checkpoints_content:dict[str,str] = {
+    'checkpoint-1000/c1f1': 'local content of checkpoint-1000/c1f1',
+    'checkpoint-1000/c1f2': 'local content of checkpoint-1000/c1f2',
+    'checkpoint-1000/c1f3': 'local content of checkpoint-1000/c1f3',
+    'checkpoint-1000/c1d1/c1d1f1': 'local content of checkpoint-1000/c1d1/c1d1f1',
+    'checkpoint-1000/c1d1/c1d1f2': 'local content of checkpoint-1000/c1d1/c1d1f2',
+    'checkpoint-1000/c1d1/c1d2f1': 'local content of checkpoint-1000/c1d1/c1d2f1',
+    'checkpoint-1000/c1d1/c1d2f2': 'local content of checkpoint-1000/c1d1/c1d2f2',
+    'checkpoint-2000/c2f1': 'local content of checkpoint-2000/c2f1',
+    'checkpoint-2000/c2f2': 'content of checkpoint-2000/c2f2',
+    'checkpoint-2000/c2f3': 'content of checkpoint-2000/c2f3',
+    'checkpoint-2000/c2d1/c1d1f1': 'content of checkpoint-2000/c2d1/c1d1f1',
+    'checkpoint-2000/c2d1/c1d1f2': 'content of checkpoint-2000/c2d1/c1d1f2',
+    'checkpoint-2000/c2d1/c1d2f1': 'content of checkpoint-2000/c2d1/c1d2f1',
+    'checkpoint-2000/c2d1/c1d2f2': 'content of checkpoint-2000/c2d1/c1d2f2',
+    'checkpoint_registry.json': '{"1000": {"checkpoint_name": "checkpoint-1000", "global_step": 1000, "segment_number": 1}, "2000": {"checkpoint_name": "checkpoint-2000", "global_step": 2000, "segment_number": 2} }'
+}
+
+def test_upload_all_aync(writable_s3_uri):
+    if writable_s3_uri:
+        bucket, prefix = TempS3Object.parse_s3_uri(writable_s3_uri)
+        if prefix: # suppress pyright warnings about unused var
+            pass
+        with tempfile.TemporaryDirectory() as temp_local_dir:
+            copy_dict_to_fs(checkpoints_content, temp_local_dir)
+            with TempS3Object(writable_s3_uri).TemporaryDirectory(delete=True) as temp_s3_dir:
+                dest_s3_uri = f's3://{bucket}/{temp_s3_dir}'
+                synchronizer = RemoteCheckpointSynchronizer.from_uri(dest_s3_uri, local_output_dir = temp_local_dir)
+                task = synchronizer.upload_all_async()
+                task.wait_for_it()
+                assert not task.error
+                s3_dict = S3Dict(bucket)
+                for rel_path, file_content in checkpoints_content.items():
+                    full_key = f'{temp_s3_dir}/{rel_path}'
+                    assert s3_dict[full_key] == file_content
+
+    else:
+        reason = 'No writable S3 URI defined'
+        warning(f'Skipping {current_test_name()}() because {reason}')
 

@@ -51,3 +51,8 @@ def populated_s3_checkpoints():
                 bucket.put_object( Key=s3_key, Body=value)
             yield {'uri': s3_uri, 'contents': checkpoints_dir_content }
 
+@pytest.fixture(scope="module")
+def writable_s3_uri():
+    s3_uri = os.environ.get(s3_uri_env_var,None)
+    yield s3_uri
+
