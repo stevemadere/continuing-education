@@ -10,6 +10,14 @@ if ('AWS_PROFILE' not in os.environ) and not ('AWS_SECRET_ACCESS_KEY' in os.envi
 dataset_bucket_name=os.environ.get('DATASET_BUCKET')
 assert dataset_bucket_name
 
+# If supplied, this should be a URI such as 's3://my-bucket/checkpoints/series1'
+# Checkpoints and the checkpoint_registry.json file will be synchronized with it
+# (first downloaded before training , then uploaded after training)
+# If you don't supply this, you'll need to use some other method to synchronize
+# the contents of your OUTPUT_DIR or this whole enterprise will be pretty useless.
+# One alternative is shown in the examples/vast_sync.bash script
+checkpoint_sync_uri=os.environ.get('CHECKPOINT_SYNC_URI')
+
 output_dir = os.environ.get('OUTPUT_DIR')
 assert output_dir
 
@@ -50,6 +58,7 @@ max_steps = int(os.environ.get('MAX_STEPS') or approx_steps_per_segment*num_segm
 continuing_trainer = QLoRAContinuingTrainer(
                       base_model_id = base_model_id,
                       dataset_bucket_name = dataset_bucket_name,
+                      checkpoint_sync_uri=checkpoint_sync_uri,
                       output_dir = output_dir,
                       dataset_series = dataset_series,
                       steps_per_round = steps_per_round,

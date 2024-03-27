@@ -5,7 +5,7 @@
 import re
 from typing import Union, cast
 import torch
-from .checkpoint_registry import CheckpointRegistry, CheckpointInfo
+from .checkpoint_registry import CheckpointRegistry, CheckpointInfo, RemoteCheckpointSynchronizer
 from .checkpoint_manager import CheckpointManager
 from s3datasets import S3TextDataset
 from datasets import Dataset, IterableDataset
@@ -163,6 +163,7 @@ class BaseContinuingTrainer(ABC):
                  base_model_id: str,
                  dataset_bucket_name: str,
                  output_dir:str = "/root/outputs",
+                 checkpoint_sync_uri: Union[str,None] = None, # typically s3://{bucketname}/{prefix}
                  dataset_id: Union[str,None] = None,
                  dataset_series: Union[str,None] = None,
                  test_dataset_id: Union[str,None] = None,
@@ -186,7 +187,13 @@ class BaseContinuingTrainer(ABC):
         self.max_seq_length = max_seq_length
         self.explicit_max_steps = max_steps
         self.save_steps = save_steps
-        self.checkpoint_registry = CheckpointRegistry(output_dir=output_dir)
+
+        checkpoint_synchronizer: Union[RemoteCheckpointSynchronizer,None] = None
+        if checkpoint_sync_uri:
+            checkpoint_synchronizer = RemoteCheckpointSynchronizer.from_uri(uri=checkpoint_sync_uri, local_output_dir=output_dir)
+
+        self.checkpoint_registry = CheckpointRegistry(output_dir=output_dir,
+                                                      remote_synchronizer=checkpoint_synchronizer)
         self.starting_checkpoint_info = None
 
         self.prepare()
@@ -226,7 +233,7 @@ class BaseContinuingTrainer(ABC):
         assert self.trainer
         assert not self.starting_step == None
 
-        logger.debug(f'generator cursor before training is segment {self.dataset_segment_number()},  {self.train_tokens_generator.get_cursor().to_dict()}')
+        logger.info(f'generator cursor before training is segment {self.dataset_segment_number()},  {self.train_tokens_generator.get_cursor().to_dict()}')
         try:
             if self.starting_checkpoint_info:
                 logger.info(f'Resuming training from checkpoint {self.starting_checkpoint_info.path()}')
@@ -239,13 +246,15 @@ class BaseContinuingTrainer(ABC):
             # check if the message matches the regex '^Batch does not contain any data'
             if re.match('^Batch does not contain any data', str(e)):
                 logger.info(f'ran out of data and the dataset_generator cursor is {self.train_tokens_generator.get_cursor().to_dict()}')
-                # calling this because the stupid exception thrown above prevented it from being invoked
-                # it needs to be called to ensure the last state of the model is saved
+                # Calling this because the stupid exception thrown above prevented it from being invoked
+                # It needs to be called to ensure the last state of the model is saved.
                 self.checkpoint_manager.on_train_end(self.trainer.args, self.trainer.state, self.trainer.control)
 
-        logger.debug(f'generator cursor after training is segment {self.dataset_segment_number()},  {self.train_tokens_generator.get_cursor().to_dict()}')
+        logger.info(f'generator cursor after training is segment {self.dataset_segment_number()},  {self.train_tokens_generator.get_cursor().to_dict()}')
         logger.info(f'Trained for {self.checkpoint_manager.steps_seen} steps')
         logger.debug(f'post training trainer state {self.trainer.state.__repr__()}')
+        # Ensure that any ongoing checkpoint uploads complete before returning
+        self.checkpoint_registry.finish_up()
 
     def dataset_segment_number(self):
         if 'checkpoint_manager' in self.__dict__ and self.checkpoint_manager:
