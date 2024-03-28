@@ -4,6 +4,7 @@ FROM pytorch/pytorch:latest
 
 RUN apt-get update && apt-get install -y --no-install-recommends git vim
 
+
 # Install required Python packages and fail if any package cannot be installed
 RUN pip install "git+https://github.com/stevemadere/transformers@resume-qlora-training"
 
@@ -17,11 +18,13 @@ RUN pip install jupyterlab \
     "optimum>=1.12.0" \
     --no-cache-dir
 
-RUN pip install "s3datasets>=2.1.1"
-RUN pip install "continuing-education>=0.0.2a4"
+RUN pip install vastai
 
 # Just in case you also want to run inference on gptq models
 RUN pip install auto-gptq --extra-index-url https://huggingface.github.io/autogptq-index/whl/cu118/ 
+
+RUN pip install "s3datasets>=2.1.1"
+RUN pip install "continuing-education>=0.0.2a4"
 
 
 # Copy scripts into the /root directory of the image
