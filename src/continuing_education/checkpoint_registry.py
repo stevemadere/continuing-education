@@ -1,5 +1,5 @@
 import os
-import sys 
+import sys
 if sys: # suppress pyright warnings about unused sys when all diagnostic prints are commented out
     pass
 
@@ -120,7 +120,7 @@ class RemoteCheckpointSynchronizer(ABC):
 
     @abstractmethod
     def download_all_sync(self) -> bool:
-        """ 
+        """
             Subclasses must overrride this.
             Downloads all files and subdirectories of the checkpoints directory from the remote to local.
             Returns true if the the local directory exists after the operation.
@@ -188,12 +188,17 @@ class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
         # first check if it is an ordinary file and if so, follow sync logic on it.
         # aws s3 sync command only works on directories so I had to implement this:
         if not S3RemoteCheckpointSynchronizer.sync_s3_uri_to_local_file(full_uri,full_local_path):
-            # use s3 sync in case the source is a directory
-            cmd = f'aws s3 sync "{full_uri}" "{full_local_path}"'
-            if not verbose:
-                cmd += ' > /dev/null 2>&1'
-            debug_print(f'about to run command "{cmd}"', file=sys.stderr)
-            subprocess.run(cmd, shell=True, check=True)
+            debug_print(f'The remote {full_uri}  does not exist as an object, checking to see if it is a dir of objects')
+            if S3RemoteCheckpointSynchronizer._remote_dir_exists(full_uri):
+                debug_print(f'{full_uri} appears to be a dir of objects.  Using s3 sync')
+                # use s3 sync in case the source is a directory
+                cmd = f'aws s3 sync "{full_uri}" "{full_local_path}"'
+                if not verbose:
+                    cmd += ' > /dev/null 2>&1'
+                debug_print(f'about to run command "{cmd}"', file=sys.stderr)
+                subprocess.run(cmd, shell=True, check=True)
+            else:
+                debug_print(f'{full_uri} does not match anything, file nor dir')
         return full_local_path if (os.path.exists(full_local_path)) else None
 
     def download_all_sync(self) -> bool:
@@ -262,6 +267,20 @@ class S3RemoteCheckpointSynchronizer(RemoteCheckpointSynchronizer):
                 return False
             else:
                 raise
+
+    @staticmethod
+    def _remote_dir_exists(s3_uri: str) -> bool:
+        bucket_name, prefix = S3RemoteCheckpointSynchronizer.parse_s3_uri(s3_uri)
+        s3_client = boto3.client('s3')
+        # exactly one trailing slash,no more, no less
+        prefix_with_slash = prefix.rstrip('/') + '/'
+        # retrieve some keys from the bucket that begin with the prefix
+        response = s3_client.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=prefix_with_slash,
+        )
+        debug_print(f'response from list_objects_v2 is {response.__repr__()}')
+        return bool('KeyCount' in response and response['KeyCount'] > 0)
 
 S3RemoteCheckpointSynchronizer.register_thyself()
 

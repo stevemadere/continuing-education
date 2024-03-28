@@ -60,7 +60,7 @@ def test_construct_with_real_uri(populated_s3_checkpoints):
         assert True
 
 
-def test_download_one_sync_with_file(populated_s3_checkpoints):
+def test_download_one_sync_with_file_that_exists(populated_s3_checkpoints):
     s3_uri = populated_s3_checkpoints['uri']
     if s3_uri:
         contents = populated_s3_checkpoints['contents']
@@ -74,6 +74,26 @@ def test_download_one_sync_with_file(populated_s3_checkpoints):
             assert os.path.exists(full_path), f'{full_path} does not exist'
             local_file_content = open(full_path,'r').read()
             assert local_file_content == remote_file_content
+    else:
+        reason = populated_s3_checkpoints['reason']
+        warning(f'Skipping {current_test_name()}() because {reason}')
+        assert True
+
+def test_download_one_sync_with_file_nonexistent(populated_s3_checkpoints):
+    s3_uri = populated_s3_checkpoints['uri']
+    if s3_uri:
+        contents = populated_s3_checkpoints['contents']
+        rel_path = 'nonexistent_file.bogus'
+        print(f'checking for nonexistent file "{rel_path}"')
+        assert not rel_path in contents
+        #with PersistentTemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            print(f'the tempdir is {temp_dir}/')
+            synchronizer = RemoteCheckpointSynchronizer.from_uri(s3_uri, local_output_dir = temp_dir)
+            assert synchronizer
+            synchronizer.download_one_sync(rel_path)
+            full_path = os.path.join(temp_dir,rel_path)
+            assert not os.path.exists(full_path), f'{full_path} should not exist because it was no on the remote'
     else:
         reason = populated_s3_checkpoints['reason']
         warning(f'Skipping {current_test_name()}() because {reason}')
@@ -110,6 +130,7 @@ def test_download_one_sync_with_directory(populated_s3_checkpoints):
         rel_path = first_matching_checkpoint_dash_number
         # print(f'trying download_one_sync on rel_path "{rel_path}"')
         with tempfile.TemporaryDirectory() as temp_dir:
+#        with PersistentTemporaryDirectory() as temp_dir:
             synchronizer = RemoteCheckpointSynchronizer.from_uri(s3_uri, local_output_dir = temp_dir)
             assert synchronizer
             synchronizer.download_one_sync(rel_path)
