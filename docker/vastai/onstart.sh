@@ -16,7 +16,15 @@ fi
 if [ -n "$SHOULD_START_TRAINING" ]
 then
 
-  /root/domain_tune_llm_qlora.py
+  if [ -n "$SHOULD_CONTINUE_TRAINING" ]
+  then
+    while /root/domain_tune_llm_qlora.py
+    do
+      echo "Training exited gracefully.  May have completed a dataset segment.  Restarting."
+    done
+  else
+    /root/domain_tune_llm_qlora.py
+  fi
 
 fi
 
