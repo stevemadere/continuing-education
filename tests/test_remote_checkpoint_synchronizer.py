@@ -196,10 +196,9 @@ def test_upload_all_aync(writable_s3_uri):
                 task = synchronizer.upload_all_async()
                 task.wait_for_it()
                 assert not task.error
-                s3_dict = S3Dict(bucket)
+                s3_dict = S3Dict(dest_s3_uri)
                 for rel_path, file_content in checkpoints_content.items():
-                    full_key = f'{temp_s3_dir}/{rel_path}'
-                    assert s3_dict[full_key] == file_content
+                    assert s3_dict[rel_path] == file_content
 
     else:
         reason = 'No writable S3 URI defined'
