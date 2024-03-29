@@ -98,11 +98,8 @@ def test_uploads_of_new_checkpoints(writable_s3_uri):
         assert registry.upload_in_progress
         registry.finish_up()
         assert not registry.upload_in_progress
-        bucket, prefix = TempS3Object.parse_s3_uri(synchronizer_s3_uri)
-        s3d = S3Dict(bucket)
+        s3d = S3Dict(synchronizer_s3_uri)
         for s3_path in s3d.keys():
-            if s3_path.startswith(prefix+'/'):
-                checkpoint_rel_path = s3_path[len(prefix)+1:]
-                assert s3d[s3_path] == checkpoints_content[checkpoint_rel_path]
+            assert s3d[s3_path] == checkpoints_content[s3_path]
 
 

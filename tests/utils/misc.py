@@ -18,9 +18,7 @@ def copy_dict_to_fs(source_dict: dict[str,str], fs_dir_path: str):
         dd[rel_path] =  content
 
 def copy_dict_to_s3(source_dict: dict[str,str], s3_uri: str):
-    bucket, prefix = TempS3Object.parse_s3_uri(s3_uri)
-    s3d = S3Dict(bucket)
+    s3d = S3Dict(s3_uri)
     for rel_path, content in source_dict.items():
-        full_path = f'{prefix}/{rel_path}'
-        s3d[full_path] =  content
+        s3d[rel_path] =  content
 
