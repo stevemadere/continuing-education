@@ -256,6 +256,9 @@ class BaseContinuingTrainer(ABC):
         # Ensure that any ongoing checkpoint uploads complete before returning
         self.checkpoint_registry.finish_up()
 
+    def reached_max_steps(self) -> bool:
+        return self.checkpoint_manager and self.checkpoint_manager.max_steps_passed
+
     def dataset_segment_number(self):
         if 'checkpoint_manager' in self.__dict__ and self.checkpoint_manager:
             return self.checkpoint_manager.current_dataset_segment_number
