@@ -24,7 +24,7 @@ RUN pip install vastai
 RUN pip install auto-gptq --extra-index-url https://huggingface.github.io/autogptq-index/whl/cu118/ 
 
 RUN pip install "s3datasets>=2.1.1"
-RUN pip install "continuing-education>=0.0.2a4"
+RUN pip install "continuing-education>=0.0.3a1"
 
 
 # Copy scripts into the /root directory of the image

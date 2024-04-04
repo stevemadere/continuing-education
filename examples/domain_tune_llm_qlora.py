@@ -67,3 +67,7 @@ continuing_trainer = QLoRAContinuingTrainer(
 
 continuing_trainer.train()
 
+# exit with a return code of 3 if finshed
+if continuing_trainer.reached_max_steps():
+    print(f'Exceeded max_steps of total training')
+    exit(3) # exit with error so caller knows to shut down container

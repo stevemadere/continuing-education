@@ -36,6 +36,7 @@ class CheckpointManager(TrainerCallback):
       current_dataset_segment_number: int
       logger: logging.Logger
       trainer_state_at_save: Union[dict,None]
+      max_steps_passed: bool
 
       def __init__(self,
                    trainer: Trainer,
@@ -58,6 +59,7 @@ class CheckpointManager(TrainerCallback):
           self._last_save_was_at_step = None
           self.trainer_state_at_save = None
           self.current_dataset_segment_number = self.starting_checkpoint_info.segment_number if (self.starting_checkpoint_info and self.starting_checkpoint_info.segment_number) else 1
+          self.max_steps_passed = False
           self.trainer.add_callback(self)
 
       def on_train_begin(self,
@@ -79,6 +81,9 @@ class CheckpointManager(TrainerCallback):
               self.logger.info(f"initial cursor is segment {self.current_dataset_segment_number}, {self.dataset_generator.get_cursor().to_dict()}")
           else:
               self.logger.debug(f"CheckpointManager is unaware of a dataset_generator")
+
+          if state.global_step >= args.max_steps:
+              self.max_steps_passed = True
 
       def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs ):
           if args or state or kwargs: # suppress unused param warnings
@@ -102,6 +107,9 @@ class CheckpointManager(TrainerCallback):
           if self.stop_after_steps and self.steps_seen >= self.stop_after_steps:
               self.logger.debug(f"Terminating training loop after {self.stop_after_steps} steps")
               control.should_training_stop = True
+
+          if state.global_step >= args.max_steps:
+              self.max_steps_passed = True
 
           # Why the heck do I have to do this?  It's insane.  This should be the default behavior of Trainer anyway.
           # Instead, if it runs out of training data, it raises an error
