@@ -26,7 +26,7 @@ then
     /root/domain_tune_llm_qlora.py
   fi
 
-  if [ -n "SHOULD_DESTROY_INSTANCE" ]
+  if [ -n "$SHOULD_DESTROY_INSTANCE" ]
   then
     echo "Training finished.  Destroying this instance"
     vastai destroy instance "$CONTAINER_ID"
